@@ -1,388 +1,152 @@
-/*
- * Smart Study Environment System - Node 1
- * Pomodoro Timer with Environment Monitoring + HTTP Server
- * 
- * Hardware:
- * - ESP8266 NodeMCU
- * - DHT11 (Temperature & Humidity)
- * - LCD I2C (16x2)
- * - Push Buttons x3
- * - LEDs (Red, Green)
- * - Active Buzzer
- */
+// #include <SoftwareSerial.h>
+// #include <DFRobotDFPlayerMini.h>
+// #include <ESP8266WiFi.h>
+// #include <espnow.h>
+// #include <Wire.h>
+// #include <LiquidCrystal_I2C.h>
 
-#include <DHT.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include "arduino_secrets.h"  // Load WiFi credentials from the secret tab
+// // DFPlayer用ピン設定（D7/D8に変更）
+// SoftwareSerial mySoftwareSerial(D7, D8); // RX, TX
+// DFRobotDFPlayerMini myDFPlayer;
 
-// ===== WiFi Configuration =====
-const char* WIFI_SSID = SECRET_SSID;      // Replace with your WiFi SSID
-const char* WIFI_PASSWORD = SECRET_PASS;  // Replace with your WiFi password
+// // LCD設定 (I2Cアドレス 0x27, 16x2サイズ)
+// LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// ===== Pin Definitions =====
-#define DHT_PIN D4          // DHT11 sensor
-#define BUTTON_START D5     // Start/Pause button
-#define BUTTON_RESET D6     // Reset button
-#define BUTTON_CONFIG D7    // Config button (for future use)
-#define LED_GREEN D3        // Green LED (timer running)
-#define LED_RED D0          // Red LED (timer stopped)
-#define BUZZER_PIN D8       // Buzzer
+// // ESP-NOW用データ構造体（Node2と同じ）
+// typedef struct struct_message {
+//   float temp;
+//   float hum;
+//   int light;
+//   float distance;
+// } struct_message;
 
-// ===== Sensor Initialization =====
-#define DHT_TYPE DHT11
-DHT dht(DHT_PIN, DHT_TYPE);
-LiquidCrystal_I2C lcd(0x27, 16, 2);  // I2C address 0x27, 16x2 display
+// struct_message receivedData;
 
-// ===== HTTP Server =====
-ESP8266WebServer server(80);  // HTTP server on port 80
+// // しきい値設定
+// const int DARK_THRESHOLD = 300;      // 暗いと判断する照度
+// const float AWAY_THRESHOLD = 100.0;  // 人がいないと判断する距離(cm)
 
-// ===== Timer Configuration =====
-// const unsigned long POMODORO_DURATION = 25 * 60 * 1000;  // 25 minutes (milliseconds)
-// For testing, use shorter duration:
-const unsigned long POMODORO_DURATION = 10 * 1000; // 10 seconds
+// bool isDark = false;
+// bool isAway = false;
+// bool alreadyPlayed = false;
 
-unsigned long timerStartTime = 0;
-unsigned long timerPausedTime = 0;
-unsigned long timerElapsed = 0;
-bool timerRunning = false;
-bool timerCompleted = false;
+// // ESP-NOWでデータ受信時に呼ばれる関数
+// void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
+//   memcpy(&receivedData, incomingData, sizeof(receivedData));
+  
+//   // シリアルモニタに表示
+//   Serial.print("Temperature: "); Serial.print(receivedData.temp); Serial.println(" C");
+//   Serial.print("Humidity: "); Serial.print(receivedData.hum); Serial.println(" %");
+//   Serial.print("Light: "); Serial.println(receivedData.light);
+//   Serial.print("Distance: "); Serial.print(receivedData.distance); Serial.println(" cm");
+//   Serial.println("---");
+  
+//   // LCD表示
+//   lcd.clear();
+//   lcd.setCursor(0, 0);
+//   lcd.print("T:");
+//   lcd.print(receivedData.temp, 1);
+//   lcd.print("C L:");
+//   lcd.print(receivedData.light);
+  
+//   lcd.setCursor(0, 1);
+//   lcd.print("H:");
+//   lcd.print(receivedData.hum, 0);
+//   lcd.print("% D:");
+//   lcd.print(receivedData.distance, 0);
+//   lcd.print("cm");
+  
+//   // 条件判定
+//   isDark = (receivedData.light < DARK_THRESHOLD);
+//   isAway = (receivedData.distance > AWAY_THRESHOLD);
+  
+//   // 暗くて人がいない場合に音を鳴らす
+//   if (isDark && isAway && !alreadyPlayed) {
+//     Serial.println(">>> ALERT: Dark and nobody detected! Playing sound...");
+//     myDFPlayer.play(1);  // 0001_Pomodoro.mp3 を再生
+//     alreadyPlayed = true;
+//   } else if (!isDark || !isAway) {
+//     // 条件が解除されたらフラグをリセット
+//     alreadyPlayed = false;
+//   }
+// }
 
-// ===== Button State Management (Debouncing) =====
-unsigned long lastDebounceTime[3] = {0, 0, 0};
-const unsigned long debounceDelay = 200;  // 200ms
-bool lastButtonState[3] = {HIGH, HIGH, HIGH};
+// void setup() {
+//   Serial.begin(115200);
+  
+//   Serial.println("WAITING...");
+//   delay(3000);
+  
+//   // DFPlayer初期化
+//   mySoftwareSerial.begin(9600);
+//   if (!myDFPlayer.begin(mySoftwareSerial)) {
+//     Serial.println("ERROR: DFPlayer NOT FOUND");
+//   } else {
+//     Serial.println("SUCCESS: DFPlayer CONNECTED!");
+//     myDFPlayer.volume(15);
+//     delay(500);
+//     myDFPlayer.play(1);  // 起動確認音（0001_Pomodoro.mp3）
+//   }
+  
+//   // I2C初期化 (SDA=D2, SCL=D1)
+//   Wire.begin(D2, D1);
+  
+//   // LCD初期化
+//   lcd.init();
+//   lcd.backlight();
+//   lcd.setCursor(0, 0);
+//   lcd.print("Node1 Ready");
+  
+//   // ESP-NOW初期化
+//   WiFi.mode(WIFI_STA);
+//   WiFi.disconnect();
+  
+//   if (esp_now_init() != 0) {
+//     Serial.println("ESP-NOW Init Error");
+//     return;
+//   }
+  
+//   esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
+//   esp_now_register_recv_cb(OnDataRecv);  // 受信コールバック登録
+  
+//   Serial.println("Node 1 Ready - Waiting for data...");
+// }
 
-// ===== Environment Data Update Interval =====
-unsigned long lastDHTRead = 0;
-const unsigned long DHT_INTERVAL = 2000;  // Every 2 seconds
-float temperature = 0;
-float humidity = 0;
+// void loop() {
+//   // 受信はコールバックで処理されるため、loopは空でOK
+//   delay(100);
+// }
 
-// ===== Buzzer Alarm Control =====
-unsigned long alarmStartTime = 0;
-const unsigned long ALARM_DURATION = 3000;  // Sound for 3 seconds
-bool alarmActive = false;
+#include <SoftwareSerial.h>
+#include <DFRobotDFPlayerMini.h>
+
+SoftwareSerial mySoftwareSerial(D7, D8);
+DFRobotDFPlayerMini myDFPlayer;
 
 void setup() {
-  Serial.begin(9600);
-  
-  // Pin mode setup
-  pinMode(BUTTON_START, INPUT_PULLUP);
-  pinMode(BUTTON_RESET, INPUT_PULLUP);
-  pinMode(BUTTON_CONFIG, INPUT_PULLUP);
-  pinMode(LED_GREEN, OUTPUT);
-  pinMode(LED_RED, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
-  
-  // Initial state: Red LED on (stopped)
-  digitalWrite(LED_RED, HIGH);
-  digitalWrite(LED_GREEN, LOW);
-  digitalWrite(BUZZER_PIN, LOW);
-  
-  // Sensor initialization
-  dht.begin();
-  lcd.init();
-  lcd.backlight();
-  
-  // Startup message
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Smart Study");
-  lcd.setCursor(0, 1);
-  lcd.print("System Ready!");
+  Serial.begin(115200);
   delay(2000);
   
-  // WiFi connection
-  connectToWiFi();
+  mySoftwareSerial.begin(9600);
   
-  // HTTP server endpoints
-  server.on("/", handleRoot);
-  server.on("/data", handleData);
-  server.begin();
-  
-  lcd.clear();
-  Serial.println("=== Smart Study Environment System ===");
-  Serial.println("Node 1: Pomodoro Timer + Environment Monitor");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void loop() {
-  // 1. Handle HTTP requests
-  server.handleClient();
-  
-  // 2. Read environment data
-  readEnvironmentData();
-  
-  // 3. Handle button inputs
-  handleButtons();
-  
-  // 4. Update timer
-  updateTimer();
-  
-  // 5. Update LCD display
-  updateDisplay();
-  
-  // 6. Handle alarm
-  handleAlarm();
-  
-  delay(100);  // Main loop delay
-}
-
-// ===== WiFi Connection =====
-void connectToWiFi() {
-  Serial.print("Connecting to WiFi");
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("WiFi Connecting");
-  
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+  if (myDFPlayer.begin(mySoftwareSerial)) {
+    Serial.println("DFPlayer Connected");
+    
+    int fileCount = myDFPlayer.readFileCounts();
+    Serial.print("Total files: ");
+    Serial.println(fileCount);
+    
+    myDFPlayer.volume(25);
     delay(500);
-    Serial.print(".");
-    lcd.setCursor(attempts % 16, 1);
-    lcd.print(".");
-    attempts++;
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi Connected!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
     
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi Connected!");
-    lcd.setCursor(0, 1);
-    lcd.print(WiFi.localIP());
-    delay(3000);
-  } else {
-    Serial.println("\nWiFi Connection Failed!");
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi Failed!");
-    delay(2000);
-  }
-}
-
-// ===== HTTP Handler: Root =====
-void handleRoot() {
-  String html = "<html><head><meta charset='UTF-8'><title>Node 1 - Pomodoro Timer</title></head>";
-  html += "<body><h1>Node 1: Pomodoro Timer</h1>";
-  html += "<p>Temperature: " + String(temperature) + " °C</p>";
-  html += "<p>Humidity: " + String(humidity) + " %</p>";
-  html += "<p>Timer Status: " + getTimerStatus() + "</p>";
-  html += "<p>Timer Remaining: " + getTimerRemaining() + "</p>";
-  html += "<p><a href='/data'>View JSON Data</a></p>";
-  html += "</body></html>";
-  
-  server.send(200, "text/html", html);
-}
-
-// ===== HTTP Handler: Data Endpoint (JSON) =====
-void handleData() {
-  String json = "{";
-  json += "\"temperature\":" + String(temperature, 1) + ",";
-  json += "\"humidity\":" + String(humidity, 0) + ",";
-  json += "\"timer_remaining\":\"" + getTimerRemaining() + "\",";
-  json += "\"status\":\"" + getTimerStatus() + "\"";
-  json += "}";
-  
-  server.send(200, "application/json", json);
-  Serial.println("Data request served: " + json);
-}
-
-// ===== Get Timer Status (String) =====
-String getTimerStatus() {
-  if (timerCompleted) {
-    return "completed";
-  } else if (timerRunning) {
-    return "studying";
-  } else if (timerElapsed > 0) {
-    return "paused";
-  } else {
-    return "ready";
-  }
-}
-
-// ===== Get Timer Remaining (String MM:SS) =====
-String getTimerRemaining() {
-  unsigned long remaining = POMODORO_DURATION - timerElapsed;
-  int minutes = remaining / 60000;
-  int seconds = (remaining % 60000) / 1000;
-  
-  String result = "";
-  if (minutes < 10) result += "0";
-  result += String(minutes);
-  result += ":";
-  if (seconds < 10) result += "0";
-  result += String(seconds);
-  
-  return result;
-}
-
-// ===== Read Environment Data =====
-void readEnvironmentData() {
-  if (millis() - lastDHTRead >= DHT_INTERVAL) {
-    float newTemp = dht.readTemperature();
-    float newHum = dht.readHumidity();
-    
-    if (!isnan(newTemp) && !isnan(newHum)) {
-      temperature = newTemp;
-      humidity = newHum;
-      
-      Serial.print("Temp: ");
-      Serial.print(temperature);
-      Serial.print("C, Hum: ");
-      Serial.print(humidity);
-      Serial.println("%");
-    }
-    
-    lastDHTRead = millis();
-  }
-}
-
-// ===== Handle Button Inputs =====
-void handleButtons() {
-  // Button 1: Start/Pause
-  if (checkButton(0, BUTTON_START)) {
-    if (!timerRunning && !timerCompleted) {
-      // Start or resume timer
-      if (timerElapsed == 0) {
-        // New start
-        timerStartTime = millis();
-      } else {
-        // Resume from pause
-        timerStartTime = millis() - timerElapsed;
-      }
-      timerRunning = true;
-      digitalWrite(LED_GREEN, HIGH);
-      digitalWrite(LED_RED, LOW);
-      Serial.println("Timer STARTED");
-    } else if (timerRunning) {
-      // Pause
-      timerElapsed = millis() - timerStartTime;
-      timerRunning = false;
-      digitalWrite(LED_GREEN, LOW);
-      digitalWrite(LED_RED, HIGH);
-      Serial.println("Timer PAUSED");
-    }
-  }
-  
-  // Button 2: Reset
-  if (checkButton(1, BUTTON_RESET)) {
-    timerStartTime = 0;
-    timerElapsed = 0;
-    timerRunning = false;
-    timerCompleted = false;
-    alarmActive = false;
-    digitalWrite(LED_GREEN, LOW);
-    digitalWrite(LED_RED, HIGH);
-    digitalWrite(BUZZER_PIN, LOW);
-    Serial.println("Timer RESET");
-  }
-  
-  // Button 3: Config (for future expansion)
-  if (checkButton(2, BUTTON_CONFIG)) {
-    Serial.println("Config button pressed (not implemented)");
-  }
-}
-
-// ===== Button Debouncing Check =====
-bool checkButton(int buttonIndex, int buttonPin) {
-  bool currentState = digitalRead(buttonPin);
-  
-  if (currentState == LOW && lastButtonState[buttonIndex] == HIGH) {
-    if (millis() - lastDebounceTime[buttonIndex] > debounceDelay) {
-      lastDebounceTime[buttonIndex] = millis();
-      lastButtonState[buttonIndex] = LOW;
-      return true;
-    }
-  }
-  
-  if (currentState == HIGH) {
-    lastButtonState[buttonIndex] = HIGH;
-  }
-  
-  return false;
-}
-
-// ===== Update Timer =====
-void updateTimer() {
-  if (timerRunning) {
-    timerElapsed = millis() - timerStartTime;
-    
-    // Check if 25 minutes elapsed
-    if (timerElapsed >= POMODORO_DURATION && !timerCompleted) {
-      timerCompleted = true;
-      timerRunning = false;
-      alarmActive = true;
-      alarmStartTime = millis();
-      digitalWrite(LED_GREEN, LOW);
-      digitalWrite(LED_RED, HIGH);
-      Serial.println("=== POMODORO COMPLETED! ===");
+    // 1番から7番まで順番に再生してみる
+    for(int i = 1; i <= 7; i++) {
+      Serial.print("Playing track ");
+      Serial.println(i);
+      myDFPlayer.play(i);
+      delay(5000); // 5秒待つ
     }
   }
 }
 
-// ===== Update LCD Display =====
-void updateDisplay() {
-  // Top line: Temperature and Humidity
-  lcd.setCursor(0, 0);
-  lcd.print("T:");
-  lcd.print(temperature, 1);
-  lcd.print("C H:");
-  lcd.print(humidity, 0);
-  lcd.print("%  ");
-  
-  // Bottom line: Timer
-  lcd.setCursor(0, 1);
-  
-  if (timerCompleted) {
-    lcd.print("COMPLETE!       ");
-  } else {
-    unsigned long remaining = POMODORO_DURATION - timerElapsed;
-    int minutes = remaining / 60000;
-    int seconds = (remaining % 60000) / 1000;
-    
-    // Timer status display
-    if (timerRunning) {
-      lcd.print("RUN ");
-    } else if (timerElapsed > 0) {
-      lcd.print("PAUSE ");
-    } else {
-      lcd.print("READY ");
-    }
-    
-    // Remaining time display
-    if (minutes < 10) lcd.print("0");
-    lcd.print(minutes);
-    lcd.print(":");
-    if (seconds < 10) lcd.print("0");
-    lcd.print(seconds);
-    lcd.print("    ");
-  }
-}
-
-// ===== Handle Alarm =====
-void handleAlarm() {
-  if (alarmActive) {
-    if (millis() - alarmStartTime < ALARM_DURATION) {
-      // Make buzzer beep (500ms ON, 500ms OFF)
-      if ((millis() / 500) % 2 == 0) {
-        digitalWrite(BUZZER_PIN, HIGH);
-      } else {
-        digitalWrite(BUZZER_PIN, LOW);
-      }
-    } else {
-      // End alarm
-      digitalWrite(BUZZER_PIN, LOW);
-      alarmActive = false;
-    }
-  }
-}
+void loop() {}

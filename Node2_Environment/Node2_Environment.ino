@@ -1,140 +1,65 @@
-/*
- * Smart Study Environment System - Node 2
- * Lighting & Presence Monitoring + Environment Alert
- */
-
 #include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include "arduino_secrets.h"  // Load WiFi credentials from the secret tab
+#include <espnow.h>
+#include <DHT.h>
 
-// ===== WiFi Configuration =====
-const char* WIFI_SSID = SECRET_SSID;
-const char* WIFI_PASSWORD = SECRET_PASS;
+#define DHTPIN D4
+#define DHTTYPE DHT11
+#define TRIG_PIN D1
+#define ECHO_PIN D2
+#define LIGHT_PIN A0
 
-// ===== Pin Definitions =====
-#define PIN_LDR A0            
-#define PIN_TRIG D1           
-#define PIN_ECHO D2           
-#define PIN_BUZZER D5          
-#define PIN_LED_ALERT D6      
-#define PIN_LED_PRESENCE D7   
+DHT dht(DHTPIN, DHTTYPE);
+uint8_t broadcastAddress[] = {0xC4, 0x5B, 0xBE, 0xF4, 0x2C, 0x67};
 
-// ===== HTTP Server =====
-ESP8266WebServer server(80);
+typedef struct struct_message {
+float temp;
+float hum;
+int light;
+float distance;
+} struct_message;
 
-// ===== Monitoring Variables =====
-int lightLevel = 0;
-long distance = 0;
-bool presenceDetected = false;
-String alertStatus = "normal";
-
-// ===== Thresholds =====
-const int LIGHT_THRESHOLD = 300;     
-const int DISTANCE_THRESHOLD = 80;   
-
-// ===== Timing Control =====
-unsigned long lastMeasureTime = 0;
-const unsigned long MEASURE_INTERVAL = 1000; 
+struct_message myData;
 
 void setup() {
-  Serial.begin(9600);
-  delay(1000); // Wait for Serial to stabilize
-  
-  pinMode(PIN_TRIG, OUTPUT);
-  pinMode(PIN_ECHO, INPUT);
-  pinMode(PIN_BUZZER, OUTPUT);
-  pinMode(PIN_LED_ALERT, OUTPUT);
-  pinMode(PIN_LED_PRESENCE, OUTPUT);
-  
-  digitalWrite(PIN_LED_ALERT, LOW);
-  digitalWrite(PIN_LED_PRESENCE, LOW);
-  
-  connectToWiFi();
-  
-  server.on("/", handleRoot);
-  server.on("/data", handleData);
-  server.begin();
-  
-  Serial.println("\nNode 2: Environment Monitor Server Started");
+Serial.begin(115200);
+dht.begin();
+pinMode(TRIG_PIN, OUTPUT);
+pinMode(ECHO_PIN, INPUT);
+
+WiFi.mode(WIFI_STA);
+WiFi.disconnect();
+
+if (esp_now_init() != 0) {
+Serial.println("ESP-NOW Init Error");
+return;
+}
+
+esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
+esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
+Serial.println("Node 2 Started");
 }
 
 void loop() {
-  server.handleClient();
-  
-  if (millis() - lastMeasureTime >= MEASURE_INTERVAL) {
-    measureEnvironment();
-    lastMeasureTime = millis();
-  }
-}
+// 1. 各センサーの値を読み取る
+myData.temp = dht.readTemperature();
+myData.hum = dht.readHumidity();
+myData.light = analogRead(LIGHT_PIN);
 
-void measureEnvironment() {
-  lightLevel = analogRead(PIN_LDR);
-  
-  digitalWrite(PIN_TRIG, LOW);
-  delayMicroseconds(2);
-  digitalWrite(PIN_TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(PIN_TRIG, LOW);
-  
-  long duration = pulseIn(PIN_ECHO, HIGH, 26000);
-  distance = duration * 0.034 / 2;
-  
-  presenceDetected = (distance > 0 && distance < DISTANCE_THRESHOLD);
-  
-  if (presenceDetected && lightLevel < LIGHT_THRESHOLD) {
-    alertStatus = "too_dark";
-    digitalWrite(PIN_LED_ALERT, HIGH);
-    tone(PIN_BUZZER, 1000, 100); 
-  } else {
-    alertStatus = "normal";
-    digitalWrite(PIN_LED_ALERT, LOW);
-    noTone(PIN_BUZZER);
-  }
-  
-  digitalWrite(PIN_LED_PRESENCE, presenceDetected ? HIGH : LOW);
-  
-  // Display data in Serial Monitor
-  Serial.print("Light: "); Serial.print(lightLevel);
-  Serial.print(" | Dist: "); Serial.print(distance);
-  Serial.print("cm | Presence: "); Serial.println(presenceDetected ? "YES" : "NO");
-}
+// 2. 超音波センサーで距離を測定
+digitalWrite(TRIG_PIN, LOW);
+delayMicroseconds(2);
+digitalWrite(TRIG_PIN, HIGH);
+delayMicroseconds(10);
+digitalWrite(TRIG_PIN, LOW);
+long duration = pulseIn(ECHO_PIN, HIGH);
+myData.distance = duration * 0.034 / 2;
 
-void handleRoot() {
-  String html = "<h1>Node 2: Environment Monitor</h1>";
-  html += "<p>Light Level: " + String(lightLevel) + "</p>";
-  html += "<p>Presence: " + String(presenceDetected ? "Detected" : "None") + "</p>";
-  html += "<p>Status: " + alertStatus + "</p>";
-  server.send(200, "text/html", html);
-}
+// 3. データを送信！(これが重要)
+esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
 
-void handleData() {
-  String json = "{";
-  json += "\"light_level\":" + String(lightLevel) + ",";
-  json += "\"presence_detected\":" + String(presenceDetected ? "true" : "false") + ",";
-  json += "\"alert_status\":\"" + alertStatus + "\"";
-  json += "}";
-  server.send(200, "application/json", json);
-}
+// 4. 確認用にシリアルモニターに出力
+Serial.print("Sent: T="); Serial.print(myData.temp);
+Serial.print(" L="); Serial.println(myData.light);
 
-void connectToWiFi() {
-  Serial.println();
-  Serial.print("Connecting to: ");
-  Serial.println(WIFI_SSID);
-  
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  
-  int timeout = 0;
-  while (WiFi.status() != WL_CONNECTED && timeout < 20) {
-    delay(500);
-    Serial.print(".");
-    timeout++;
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi Connected!");
-    Serial.print("Node 2 IP Address: ");
-    Serial.println(WiFi.localIP()); // THIS IS IMPORTANT FOR NODE 3
-  } else {
-    Serial.println("\nWiFi Connection Failed. Check credentials in arduino_secrets.h");
-  }
+delay(2000); // 2秒おきに送信
 }
