@@ -12,10 +12,10 @@ DHT dht(DHTPIN, DHTTYPE);
 uint8_t broadcastAddress[] = {0xC4, 0x5B, 0xBE, 0xF4, 0x2C, 0x67};
 
 typedef struct struct_message {
-float temp;
-float hum;
-int light;
-float distance;
+  float temp;
+  float hum;
+  int light;
+  float distance;
 } struct_message;
 
 struct_message myData;
@@ -58,8 +58,10 @@ myData.distance = duration * 0.034 / 2;
 esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
 
 // 4. 確認用にシリアルモニターに出力
-Serial.print("Sent: T="); Serial.print(myData.temp);
-Serial.print(" L="); Serial.println(myData.light);
+Serial.print("Temp: "); Serial.print(myData.temp);
+Serial.print(" Hum: "); Serial.print(myData.hum);
+Serial.print(" Light: "); Serial.print(myData.light);
+Serial.print(" Dist: "); Serial.println(myData.distance);
 
 delay(2000); // 2秒おきに送信
 }
