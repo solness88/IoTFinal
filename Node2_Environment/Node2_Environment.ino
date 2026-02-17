@@ -23,6 +23,7 @@ typedef struct struct_message {
   float hum;
   int light;
   float distance;
+  int nodeId;
 } struct_message;
 
 struct_message myData;
@@ -55,6 +56,8 @@ void setup() {
 }
 
 void loop() {
+  myData.nodeId = 2; 
+
   // 1. 各センサーの値を読み取る
   myData.temp = dht.readTemperature();
   myData.hum = dht.readHumidity();

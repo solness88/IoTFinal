@@ -9,6 +9,8 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 SoftwareSerial mySoftwareSerial(D7, D8); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
 
+uint8_t node3Address[] = {0xDC, 0x4F, 0x22, 0x7F, 0x43, 0xAE};
+
 int targetMinutes = 0;
 bool isRunning = false;
 unsigned long previousMillis = 0;
@@ -18,6 +20,7 @@ struct Message {
   char key;
   int command;
   int potValue;
+  int servoCommand;
 };
 
 Message incomingData;
@@ -27,6 +30,7 @@ struct SensorData {
   float hum;
   int light;
   float distance;
+  int nodeId;
 };
 
 bool tempAlertPlayed = false;
@@ -71,8 +75,22 @@ void updateDisplay() {
 }
 
 void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
+
+    Serial.print("len: ");
+  Serial.println(len);  // ← 追加
+
+
+
+
   // Node3からのメッセージ（サイズ判定）
   if (len == sizeof(Message)) {
+
+
+    Serial.println("Message received");  // ← 追加
+
+
+
+
     memcpy(&incomingData, data, sizeof(incomingData));
     
     // ポテンショメーター値受信
@@ -108,6 +126,15 @@ void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
   
   // Node2からのセンサーデータ
   else if (len == sizeof(SensorData)) {
+
+
+
+    Serial.println("SensorData received");  // ← 追加
+
+
+
+
+
     unsigned long currentTime = millis();
     if (currentTime - lastAlertTime < 2000) {  // 2秒以内ならスキップ
       return;
@@ -116,7 +143,12 @@ void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
     
     SensorData sensorData;
     memcpy(&sensorData, data, sizeof(sensorData));
-    
+      
+    Serial.print("Temp: "); Serial.println(sensorData.temp);
+    Serial.print("Hum: "); Serial.println(sensorData.hum);
+    Serial.print("Light: "); Serial.println(sensorData.light);
+    Serial.print("Dist: "); Serial.println(sensorData.distance);
+
     // 1. 温度チェック (25度以上)
     if (sensorData.temp >= 25.0 && !tempAlertPlayed) {
       myDFPlayer.play(3);
@@ -148,6 +180,15 @@ void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
 
 void setup() {
   Serial.begin(115200);
+
+
+  delay(2000);  // ← 変更
+  Serial.print("sizeof(Message): ");
+  Serial.println(sizeof(Message));
+  Serial.print("sizeof(SensorData): ");
+  Serial.println(sizeof(SensorData));
+
+
   mySoftwareSerial.begin(9600);
   delay(1000);
 
@@ -158,9 +199,9 @@ void setup() {
     Serial.println("DFPlayer Error");
     lcd.clear();
     lcd.print("DFPlayer Error");
-    while(1);
+    //while(1);
   }
-  Serial.println("DFPlayer OK");
+  //Serial.println("DFPlayer OK");
   delay(500);
   myDFPlayer.volume(30);
   
@@ -170,6 +211,9 @@ void setup() {
   if (esp_now_init() != 0) return;
   esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
   esp_now_register_recv_cb(onDataRecv);
+
+  esp_now_add_peer(node3Address, ESP_NOW_ROLE_CONTROLLER, 1, NULL, 0);
+
 }
 
 void loop() {
@@ -202,14 +246,32 @@ void loop() {
 
       if (remainingSeconds <= 0) {
         if (!isBreakTime) {
+          // Focus Time終了 → サーボ180度回転命令送信
+          Message servoMsg;
+          servoMsg.key = '\0';
+          servoMsg.servoCommand = 1;  // バナー表示
+          servoMsg.command = 0;
+          servoMsg.potValue = 0;
+          esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+          
           isBreakTime = true;
           remainingSeconds = BREAK_TIME * 60;
           isRunning = true;
           myDFPlayer.play(2);
+          delay(3000);         // 終了音が鳴り終わるのを待つ
+          myDFPlayer.play(8);  // ← BGM再生追加
           lcd.clear();
           lcd.print("Break Time!");
           delay(2000);
         } else {
+          // Rest Time終了 → サーボ0度回転命令送信
+          Message servoMsg;
+          servoMsg.key = '\0';
+          servoMsg.servoCommand = 2;  // バナー隠す
+          servoMsg.command = 0;
+          servoMsg.potValue = 0;
+          esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+          
           isBreakTime = false;
           remainingSeconds = targetMinutes * 60;
           isRunning = true;
