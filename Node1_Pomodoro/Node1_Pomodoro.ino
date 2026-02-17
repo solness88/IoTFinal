@@ -17,7 +17,9 @@ long remainingSeconds = 0;
 struct Message {
   char key;
   int command;
+  int potValue;
 };
+
 Message incomingData;
 
 struct SensorData {
@@ -34,23 +36,38 @@ bool userAway = false;
 unsigned long lastAlertTime = 0;
 float lastDistance = 0;
 
+bool isBreakTime = false;
+const int BREAK_TIME = 5;   // 休憩時間（分）
+
+
 void updateDisplay() {
   lcd.clear();
   lcd.setCursor(0, 0);
   if (isRunning) {
-    lcd.print("** FOCUSING **");
-  } else if (remainingSeconds > 0) {
+    if (isBreakTime) {
+      lcd.print("** BREAK TIME **");
+    } else {
+      lcd.print("** FOCUSING **");
+    }
+    lcd.setCursor(0, 1);
+    int m = remainingSeconds / 60;
+    int s = remainingSeconds % 60;
+    lcd.printf("Time: %02d:%02d", m, s);
+  } else if (remainingSeconds > 0 && targetMinutes > 0) {  // ← PAUSE表示追加
     lcd.print("== PAUSED ==");
+    lcd.setCursor(0, 1);
+    int m = remainingSeconds / 60;
+    int s = remainingSeconds % 60;
+    lcd.printf("Time: %02d:%02d", m, s);
+  } else if (targetMinutes > 0) {
+    lcd.printf("Time: %02d:00", targetMinutes);
+    lcd.setCursor(0, 1);
+    lcd.print("Blue BTN Start");
   } else {
-    lcd.print("Set Time: ");
-    lcd.print(targetMinutes);
-    lcd.print("m");
+    lcd.print("Set Focus Time");
+    lcd.setCursor(0, 1);
+    lcd.print("w/ Potentiometer");
   }
-
-  lcd.setCursor(0, 1);
-  int m = remainingSeconds / 60;
-  int s = remainingSeconds % 60;
-  lcd.printf("Time: %02d:%02d", m, s);
 }
 
 void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
@@ -58,19 +75,21 @@ void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
   if (len == sizeof(Message)) {
     memcpy(&incomingData, data, sizeof(incomingData));
     
-    // 数字キー入力：停止中のみ受け付け
-    if (incomingData.key >= '0' && incomingData.key <= '9' && !isRunning) {
-      targetMinutes = targetMinutes * 10 + (incomingData.key - '0');
-      if (targetMinutes > 99) targetMinutes = 99;
-      remainingSeconds = targetMinutes * 60;
+    // ポテンショメーター値受信
+    if (incomingData.potValue > 0 && !isRunning && incomingData.command == 0 && remainingSeconds == 0) {
+      targetMinutes = incomingData.potValue;
+      //remainingSeconds = targetMinutes * 60;
       updateDisplay();
     }
     
     // D2ボタン（青）：開始と一時停止のトグル
     if (incomingData.command == 2) {
+      if (targetMinutes > 0 && remainingSeconds == 0) {
+        remainingSeconds = targetMinutes * 60;  // ← ここで初めて設定
+      }
       if (remainingSeconds > 0) {
         isRunning = !isRunning;
-        if (isRunning) {
+        if (isRunning && remainingSeconds == targetMinutes * 60) {
           myDFPlayer.play(1);
         }
         updateDisplay();
@@ -134,7 +153,6 @@ void setup() {
 
   lcd.init();
   lcd.backlight();
-  lcd.print("System Ready");
 
   if (!myDFPlayer.begin(mySoftwareSerial)) {
     Serial.println("DFPlayer Error");
@@ -144,7 +162,9 @@ void setup() {
   }
   Serial.println("DFPlayer OK");
   delay(500);
-  myDFPlayer.volume(20);
+  myDFPlayer.volume(30);
+  
+  updateDisplay();
 
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != 0) return;
@@ -152,88 +172,27 @@ void setup() {
   esp_now_register_recv_cb(onDataRecv);
 }
 
-// void loop() {
-//   // 離席検知処理
-//   if (lastDistance >= 50.0 && !userAway) {
-//     myDFPlayer.play(6);
-//     userAway = true;
-//     if (isRunning) {
-//       isRunning = false;
-//       updateDisplay();
-//     }
-//   } else if (lastDistance <= 30.0 && userAway) {
-//     myDFPlayer.play(7);
-//     userAway = false;
-//     if (remainingSeconds > 0) {
-//       isRunning = true;
-//       updateDisplay();
-//     }
-//   }
-  
-//   // 既存のタイマー処理
-//   if (isRunning && remainingSeconds > 0) {
-//     unsigned long currentMillis = millis();
-//     if (currentMillis - previousMillis >= 1000) {
-//       previousMillis = currentMillis;
-//       remainingSeconds--;
-//       updateDisplay();
-
-//       if (remainingSeconds <= 0) {
-//         isRunning = false;
-//         myDFPlayer.play(2);
-//         lcd.clear();
-//         lcd.print("Time Up!");
-//       }
-//     }
-//   }
-// }
-
-// void loop() {
-//   // 1. 各センサーの値を読み取る
-//   myData.temp = dht.readTemperature();
-//   myData.hum = dht.readHumidity();
-//   myData.light = analogRead(LIGHT_PIN);
-
-//   // 2. 超音波センサーで距離を測定
-//   digitalWrite(TRIG_PIN, LOW);
-//   delayMicroseconds(2);
-//   digitalWrite(TRIG_PIN, HIGH);
-//   delayMicroseconds(10);
-//   digitalWrite(TRIG_PIN, LOW);
-//   long duration = pulseIn(ECHO_PIN, HIGH);
-//   myData.distance = duration * 0.034 / 2;
-
-//   // 3. データを送信
-//   esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
-
-//   // 4. 確認用にシリアルモニターに出力
-//   Serial.print("Temp: "); Serial.print(myData.temp);
-//   Serial.print(" Hum: "); Serial.print(myData.hum);
-//   Serial.print(" Light: "); Serial.print(myData.light);
-//   Serial.print(" Dist: "); Serial.println(myData.distance);
-
-//   delay(5000);
-// }
-
 void loop() {
-  // 離席検知処理
-  if (lastDistance >= 80.0 && !userAway) {
-    myDFPlayer.play(6);
-    userAway = true;
-    if (isRunning) {
-      isRunning = false;
-      updateDisplay();
+  // 離席検知処理（学習中のみ）
+  if (!isBreakTime) {  // ← 追加
+    if (lastDistance >= 80.0 && !userAway) {
+      myDFPlayer.play(6);
+      userAway = true;
+      if (isRunning) {
+        isRunning = false;
+        updateDisplay();
+      }
+    } else if (lastDistance <= 50.0 && userAway) {
+      myDFPlayer.play(7);
+      userAway = false;
+      if (remainingSeconds > 0) {
+        isRunning = true;
+        updateDisplay();
+      }
     }
-  } else if (lastDistance <= 50.0 && userAway) {
-    myDFPlayer.play(7);
-    userAway = false;
-    if (remainingSeconds > 0) {
-      isRunning = true;
-      updateDisplay();
-    }
-  }
-  
-  // タイマー処理
+  }  // ← 追加
+
+  // タイマー処理（以下変更なし）
   if (isRunning && remainingSeconds > 0) {
     unsigned long currentMillis = millis();
     if (currentMillis - previousMillis >= 1000) {
@@ -242,10 +201,24 @@ void loop() {
       updateDisplay();
 
       if (remainingSeconds <= 0) {
-        isRunning = false;
-        myDFPlayer.play(2);
-        lcd.clear();
-        lcd.print("Time Up!");
+        if (!isBreakTime) {
+          isBreakTime = true;
+          remainingSeconds = BREAK_TIME * 60;
+          isRunning = true;
+          myDFPlayer.play(2);
+          lcd.clear();
+          lcd.print("Break Time!");
+          delay(2000);
+        } else {
+          isBreakTime = false;
+          remainingSeconds = targetMinutes * 60;
+          isRunning = true;
+          myDFPlayer.play(1);
+          lcd.clear();
+          lcd.print("Study Time!");
+          delay(2000);
+        }
+        updateDisplay();
       }
     }
   }
