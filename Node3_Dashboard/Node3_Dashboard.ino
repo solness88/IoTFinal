@@ -9,6 +9,11 @@ const int btnStart = D1;
 const int btnReset = D2;
 const int SERVO_PIN = D0;
 
+// LED color settings
+const int LED_BLUE = D3;
+const int LED_RED = D4;
+const int LED_YELLOW = D5;
+
 Servo myServo;
 
 struct Message {
@@ -24,22 +29,44 @@ int lastPotMinutes = 0;
 
 void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
   memcpy(&incomingData, data, sizeof(incomingData));
-    Serial.print("servoCommand: ");
-  Serial.println(incomingData.servoCommand);  // ← 追加
-  if (incomingData.servoCommand == 1) {
-    myServo.write(0);  // バナー表示
-  } else if (incomingData.servoCommand == 2) {
-    myServo.write(180);    // バナー隠す
+  Serial.print("servoCommand: ");
+  Serial.println(incomingData.servoCommand);
+  
+  if (incomingData.servoCommand == 1) {  // Break Time
+    myServo.write(0);
+    digitalWrite(LED_BLUE, LOW);
+    digitalWrite(LED_RED, HIGH);
+    digitalWrite(LED_YELLOW, LOW);
+  } else if (incomingData.servoCommand == 2) {  // Focus Time
+    myServo.write(180);
+    digitalWrite(LED_BLUE, HIGH);
+    digitalWrite(LED_RED, LOW);
+    digitalWrite(LED_YELLOW, LOW);
+  } else if (incomingData.servoCommand == 3) {  // 入力待ち
+    myServo.write(180);
+    digitalWrite(LED_BLUE, LOW);
+    digitalWrite(LED_RED, LOW);
+    digitalWrite(LED_YELLOW, HIGH);
   }
 }
+
 void setup() {
   Serial.begin(115200);
   
   pinMode(btnStart, INPUT_PULLUP);
   pinMode(btnReset, INPUT_PULLUP);
   
+  pinMode(LED_BLUE, OUTPUT);
+  pinMode(LED_RED, OUTPUT);
+  pinMode(LED_YELLOW, OUTPUT);
+  
+  // 初期は黄色点灯
+  digitalWrite(LED_BLUE, LOW);
+  digitalWrite(LED_RED, LOW);
+  digitalWrite(LED_YELLOW, HIGH);
+
   myServo.attach(SERVO_PIN);
-  myServo.write(180);  // 初期位置
+  myServo.write(180);
   
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
@@ -64,11 +91,9 @@ void loop() {
   myData.servoCommand = 0;
   bool shouldSend = false;
 
-  // ポテンショメーター読み取り（0-1023を0-60分に変換）
   int rawValue = analogRead(potPin);
   int potMinutes = map(rawValue, 0, 1023, 0, 60);
 
-  // 値が変わった時だけ送信
   if (potMinutes != lastPotMinutes) {
     myData.potValue = potMinutes;
     lastPotMinutes = potMinutes;
@@ -77,7 +102,6 @@ void loop() {
     Serial.println(potMinutes);
   }
 
-  // スタート/一時停止ボタン
   if (digitalRead(btnStart) == LOW) {
     myData.command = 2;
     shouldSend = true;
@@ -85,7 +109,6 @@ void loop() {
     delay(300);
   }
 
-  // リセットボタン
   if (digitalRead(btnReset) == LOW) {
     myData.command = 1;
     shouldSend = true;

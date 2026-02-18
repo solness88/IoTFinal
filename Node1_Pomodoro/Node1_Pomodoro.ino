@@ -101,26 +101,43 @@ void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
     }
     
     // D2ボタン（青）：開始と一時停止のトグル
-    if (incomingData.command == 2) {
-      if (targetMinutes > 0 && remainingSeconds == 0) {
-        remainingSeconds = targetMinutes * 60;  // ← ここで初めて設定
-      }
-      if (remainingSeconds > 0) {
-        isRunning = !isRunning;
-        if (isRunning && remainingSeconds == targetMinutes * 60) {
-          myDFPlayer.play(1);
-        }
-        updateDisplay();
-      }
+if (incomingData.command == 2) {
+  if (targetMinutes > 0 && remainingSeconds == 0) {
+    remainingSeconds = targetMinutes * 60;
+  }
+  if (remainingSeconds > 0) {
+    isRunning = !isRunning;
+    if (isRunning && remainingSeconds == targetMinutes * 60) {
+      // Focus Time開始
+      myDFPlayer.play(1);
+      
+      Message servoMsg;
+      servoMsg.key = '\0';
+      servoMsg.servoCommand = 2;
+      servoMsg.command = 0;
+      servoMsg.potValue = 0;
+      esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
     }
+    updateDisplay();
+  }
+}
     
     // D0ボタン（赤）：リセット
     else if (incomingData.command == 1) {
-      isRunning = false;
-      targetMinutes = 0;
-      remainingSeconds = 0;
-      myDFPlayer.stop();
-      updateDisplay();
+  isRunning = false;
+  isBreakTime = false;
+  targetMinutes = 0;
+  remainingSeconds = 0;
+  myDFPlayer.stop();
+  
+  Message servoMsg;
+  servoMsg.key = '\0';
+  servoMsg.servoCommand = 3;  // ← 入力待ちモード
+  servoMsg.command = 0;
+  servoMsg.potValue = 0;
+  esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+  
+  updateDisplay();
     }
   }
   
@@ -213,6 +230,12 @@ void setup() {
   esp_now_register_recv_cb(onDataRecv);
 
   esp_now_add_peer(node3Address, ESP_NOW_ROLE_CONTROLLER, 1, NULL, 0);
+Message initMsg;
+initMsg.key = '\0';
+initMsg.servoCommand = 3;  // ← 入力待ちモード
+initMsg.command = 0;
+initMsg.potValue = 0;
+esp_now_send(node3Address, (uint8_t *) &initMsg, sizeof(initMsg));
 
 }
 
@@ -244,44 +267,50 @@ void loop() {
       remainingSeconds--;
       updateDisplay();
 
-      if (remainingSeconds <= 0) {
-        if (!isBreakTime) {
-          // Focus Time終了 → サーボ180度回転命令送信
-          Message servoMsg;
-          servoMsg.key = '\0';
-          servoMsg.servoCommand = 1;  // バナー表示
-          servoMsg.command = 0;
-          servoMsg.potValue = 0;
-          esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
-          
-          isBreakTime = true;
-          remainingSeconds = BREAK_TIME * 60;
-          isRunning = true;
-          myDFPlayer.play(2);
-          delay(3000);         // 終了音が鳴り終わるのを待つ
-          myDFPlayer.play(8);  // ← BGM再生追加
-          lcd.clear();
-          lcd.print("Break Time!");
-          delay(2000);
-        } else {
-          // Rest Time終了 → サーボ0度回転命令送信
-          Message servoMsg;
-          servoMsg.key = '\0';
-          servoMsg.servoCommand = 2;  // バナー隠す
-          servoMsg.command = 0;
-          servoMsg.potValue = 0;
-          esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
-          
-          isBreakTime = false;
-          remainingSeconds = targetMinutes * 60;
-          isRunning = true;
-          myDFPlayer.play(1);
-          lcd.clear();
-          lcd.print("Study Time!");
-          delay(2000);
-        }
-        updateDisplay();
-      }
+if (remainingSeconds <= 0) {
+  if (!isBreakTime) {
+    // すぐにisBreakTimeとremainingSecondsを更新
+    isBreakTime = true;
+    remainingSeconds = BREAK_TIME * 60;
+    isRunning = true;
+    
+    // その後サーボと音声
+    Message servoMsg;
+    servoMsg.key = '\0';
+    servoMsg.servoCommand = 1;
+    servoMsg.command = 0;
+    servoMsg.potValue = 0;
+    esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+    
+    myDFPlayer.play(2);
+    delay(3000);
+    myDFPlayer.play(8);
+    lcd.clear();
+    lcd.print("Break Time!");
+    delay(2000);
+  } else {
+    // すぐにisBreakTimeとremainingSecondsを更新
+    isBreakTime = false;
+    remainingSeconds = targetMinutes * 60;
+    isRunning = true;
+    
+    // その後サーボと音声
+    Message servoMsg;
+    servoMsg.key = '\0';
+    servoMsg.servoCommand = 2;
+    servoMsg.command = 0;
+    servoMsg.potValue = 0;
+    esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+    
+    myDFPlayer.stop();
+    delay(500);
+    myDFPlayer.play(1);
+    lcd.clear();
+    lcd.print("Study Time!");
+    delay(2000);
+  }
+  updateDisplay();
+}
     }
   }
 }
