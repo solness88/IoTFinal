@@ -21,6 +21,7 @@ struct Message {
   int command;
   int potValue;
   int servoCommand;
+    int focusMinutes;/////////
 };
 
 Message incomingData;
@@ -116,6 +117,7 @@ if (incomingData.command == 2) {
       servoMsg.servoCommand = 2;
       servoMsg.command = 0;
       servoMsg.potValue = 0;
+    servoMsg.focusMinutes = targetMinutes;  //////////////////////      
       esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
     }
     updateDisplay();
