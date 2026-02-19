@@ -1,10 +1,14 @@
 
+#include <ESP8266WebServer.h>
+#include "arduino_secrets.h"
 #include <ESP8266WiFi.h>
 #include <espnow.h>
 #include <Servo.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+
+ESP8266WebServer server(80);
 
 // Node 1のMACアドレス
 uint8_t receiverAddress[] = {0xC4, 0x5B, 0xBE, 0xF4, 0x2C, 0x67};
@@ -110,8 +114,51 @@ void setup() {
     display.display();
   }
 
+
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", []() {
+    String html = "<html><body>";
+    html += "<h1>Node 3 Dashboard</h1>";
+    html += "<p>Focus Time: " + String(fixedPotMinutes) + " min</p>";
+    html += "<p>Mode: ";
+    if (currentServoMode == 1) html += "BREAK";
+    else if (currentServoMode == 2) html += "FOCUS";
+    else html += "READY";
+    html += "</p></body></html>";
+    server.send(200, "text/html", html);
+  });
+
+  server.on("/data", []() {
+    String json = "{";
+    json += "\"focusMinutes\":" + String(fixedPotMinutes) + ",";
+    json += "\"mode\":";
+    if (currentServoMode == 1) json += "\"BREAK\"";
+    else if (currentServoMode == 2) json += "\"FOCUS\"";
+    else json += "\"READY\"";
+    json += "}";
+    server.send(200, "application/json", json);
+  });
+
+  server.begin();
+
+
+
+
+
+
+
+
+
+
   
   if (esp_now_init() != 0) {
     Serial.println("ESP-NOW Init Failed");
@@ -131,6 +178,13 @@ fixedPotMinutes = lastPotMinutes;
 }
 
 void loop() {
+
+
+  server.handleClient();
+
+
+
+
   // --- 受信したモードに基づいてアクチュエータ（サーボ・LED・モーター）を制御 ---
   if (currentServoMode == 1) {  // Break Time
     myServo.write(0);

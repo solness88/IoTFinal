@@ -1,9 +1,13 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
 #include <espnow.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <SoftwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
+#include "arduino_secrets.h"//////////
+
+ESP8266WebServer server(80);//////////
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 SoftwareSerial mySoftwareSerial(D7, D8); // RX, TX
@@ -79,135 +83,6 @@ void updateDisplay() {
     lcd.print("w/ Potentiometer");
   }
 }
-
-// void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
-
-
-
-//     Serial.print("len: ");
-//   Serial.println(len);  // ← 追加
-
-
-
-
-//   // Node3からのメッセージ（サイズ判定）
-//   if (len == sizeof(Message)) {
-
-
-//     Serial.println("Message received");  // ← 追加
-
-// Serial.print("potValue: ");
-// Serial.println(incomingData.potValue);
-// Serial.print("command: ");
-// Serial.println(incomingData.command);
-
-
-//     memcpy(&incomingData, data, sizeof(incomingData));
-    
-//     // ポテンショメーター値受信
-//     if (incomingData.potValue > 0 && !isRunning && incomingData.command == 0 && remainingSeconds == 0) {
-//       targetMinutes = incomingData.potValue;
-//       //remainingSeconds = targetMinutes * 60;
-//       updateDisplay();
-//     }
-    
-//     // D2ボタン（青）：開始と一時停止のトグル
-// if (incomingData.command == 2) {
-//   if (targetMinutes > 0 && remainingSeconds == 0) {
-//     remainingSeconds = targetMinutes * 60;
-//   }
-//   if (remainingSeconds > 0) {
-//     isRunning = !isRunning;
-//     if (isRunning && remainingSeconds == targetMinutes * 60) {
-//       // Focus Time開始
-//       myDFPlayer.play(1);
-      
-//       Message servoMsg;
-//       servoMsg.key = '\0';
-//       servoMsg.servoCommand = 2;
-//       servoMsg.command = 0;
-//       servoMsg.potValue = 0;
-//     servoMsg.focusMinutes = targetMinutes;  //////////////////////      
-//       esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
-//     }
-//     updateDisplay();
-//   }
-// }
-    
-//     // D0ボタン（赤）：リセット
-//     else if (incomingData.command == 1) {
-//   isRunning = false;
-//   isBreakTime = false;
-//   targetMinutes = 0;
-//   remainingSeconds = 0;
-//   myDFPlayer.stop();
-  
-//   Message servoMsg;
-//   servoMsg.key = '\0';
-//   servoMsg.servoCommand = 3;  // ← 入力待ちモード
-//   servoMsg.command = 0;
-//   servoMsg.potValue = 0;
-//   esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
-  
-//   updateDisplay();
-//     }
-//   }
-  
-//   // Node2からのセンサーデータ
-//   else if (len == sizeof(SensorData)) {
-
-
-
-//     Serial.println("SensorData received");  // ← 追加
-
-
-
-
-
-//     unsigned long currentTime = millis();
-//     if (currentTime - lastAlertTime < 2000) {  // 2秒以内ならスキップ
-//       return;
-//     }
-//     lastAlertTime = currentTime;
-    
-//     SensorData sensorData;
-//     memcpy(&sensorData, data, sizeof(sensorData));
-      
-//     Serial.print("Temp: "); Serial.println(sensorData.temp);
-//     Serial.print("Hum: "); Serial.println(sensorData.hum);
-//     Serial.print("Light: "); Serial.println(sensorData.light);
-//     Serial.print("Dist: "); Serial.println(sensorData.distance);
-
-//     // 1. 温度チェック (25度以上)
-//     if (sensorData.temp >= 25.0 && !tempAlertPlayed) {
-//       myDFPlayer.play(3);
-//       tempAlertPlayed = true;
-//     } else if (sensorData.temp < 25.0) {
-//       tempAlertPlayed = false;
-//     }
-    
-//     // 2. 湿度チェック (40%以下)
-//     if (sensorData.hum <= 40.0 && !humAlertPlayed) {
-//       myDFPlayer.play(4);
-//       humAlertPlayed = true;
-//     } else if (sensorData.hum > 40.0) {
-//       humAlertPlayed = false;
-//     }
-    
-//     // 3. 明るさチェック (200以下)
-//     if (sensorData.light <= 200 && !lightAlertPlayed) {
-//       myDFPlayer.play(5);
-//       lightAlertPlayed = true;
-//     } else if (sensorData.light > 200) {
-//       lightAlertPlayed = false;
-//     }
-    
-//     // 4&5. 離席検知 - データ保存のみ
-//     lastDistance = sensorData.distance;
-//   }
-// }
-
-
 
 void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
   Serial.print("len: ");
@@ -356,9 +231,51 @@ Serial.println(sizeof(Message));
 Serial.print("sizeof(SensorData): ");
 Serial.println(sizeof(SensorData));
 
+
+
+
+  ///////////////////////////
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", []() {
+    String html = "<html><body>";
+    html += "<h1>Node 1 Dashboard</h1>";
+    html += "<p>Status: " + String(isRunning ? "Running" : "Stopped") + "</p>";
+    html += "<p>Target: " + String(targetMinutes) + " min</p>";
+    html += "<p>Remaining: " + String(remainingSeconds / 60) + " min " + String(remainingSeconds % 60) + " sec</p>";
+    html += "<p>Mode: " + String(isBreakTime ? "Break" : "Focus") + "</p>";
+    html += "</body></html>";
+    server.send(200, "text/html", html);
+  });
+
+  server.on("/data", []() {
+    String json = "{";
+    json += "\"status\":\"" + String(isRunning ? "running" : "stopped") + "\",";
+    json += "\"targetMinutes\":" + String(targetMinutes) + ",";
+    json += "\"remainingSeconds\":" + String(remainingSeconds) + ",";
+    json += "\"isBreakTime\":" + String(isBreakTime ? "true" : "false");
+    json += "}";
+    server.send(200, "application/json", json);
+  });
+
+  server.begin();
+
+
+
+
 }
 
 void loop() {
+
+  /////////////////////////////
+  server.handleClient();
+
   // 離席検知処理（学習中のみ）
   if (!isBreakTime) {  // ← 追加
     if (lastDistance >= 80.0 && !userAway) {

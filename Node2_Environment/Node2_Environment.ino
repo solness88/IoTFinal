@@ -1,9 +1,13 @@
+#include <ESP8266WebServer.h>
+#include "arduino_secrets.h"
 #include <ESP8266WiFi.h>
 #include <espnow.h>
 #include <DHT.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+
+ESP8266WebServer server(80);
 
 #define DHTPIN D4
 #define DHTTYPE DHT11
@@ -56,6 +60,48 @@ Serial.println(WiFi.macAddress());
   esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
   Serial.println("Node 2 Started");
 
+
+
+
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", []() {
+    String html = "<html><body>";
+    html += "<h1>Node 2 Dashboard</h1>";
+    html += "<p>Temperature: " + String(myData.temp) + " C</p>";
+    html += "<p>Humidity: " + String(myData.hum) + " %</p>";
+    html += "<p>Light: " + String(myData.light) + "</p>";
+    html += "<p>Distance: " + String(myData.distance) + " cm</p>";
+    html += "</body></html>";
+    server.send(200, "text/html", html);
+  });
+
+  server.on("/data", []() {
+    String json = "{";
+    json += "\"temp\":" + String(myData.temp) + ",";
+    json += "\"hum\":" + String(myData.hum) + ",";
+    json += "\"light\":" + String(myData.light) + ",";
+    json += "\"distance\":" + String(myData.distance);
+    json += "}";
+    server.send(200, "application/json", json);
+  });
+
+  server.begin();
+
+
+
+
+
+
+
+
+
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("OLED Error");
   }
@@ -66,6 +112,11 @@ Serial.println(WiFi.macAddress());
 }
 
 void loop() {
+
+
+  server.handleClient();
+
+
   myData.nodeId = 2; 
 
   // 1. 各センサーの値を読み取る
