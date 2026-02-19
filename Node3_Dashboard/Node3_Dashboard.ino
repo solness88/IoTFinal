@@ -26,6 +26,8 @@ struct Message {
   int command;
   int potValue;
   int servoCommand;
+    int focusMinutes;
+
 };
 Message myData;
 Message incomingData;
