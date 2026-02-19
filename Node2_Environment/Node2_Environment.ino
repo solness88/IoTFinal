@@ -30,6 +30,16 @@ struct_message myData;
 
 void setup() {
   Serial.begin(115200);
+
+
+
+Serial.print("MAC: ");
+Serial.println(WiFi.macAddress());
+
+
+
+
+
   dht.begin();
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);

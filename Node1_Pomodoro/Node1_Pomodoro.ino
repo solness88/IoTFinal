@@ -10,6 +10,7 @@ SoftwareSerial mySoftwareSerial(D7, D8); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
 
 uint8_t node3Address[] = {0xDC, 0x4F, 0x22, 0x7F, 0x43, 0xAE};
+uint8_t node2Address[] = {0xE8, 0xDB, 0x84, 0xF0, 0x6D, 0xEF}; // Node2のMACアドレスを入力
 
 int targetMinutes = 0;
 bool isRunning = false;
@@ -79,128 +80,218 @@ void updateDisplay() {
   }
 }
 
-void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
-
-    Serial.print("len: ");
-  Serial.println(len);  // ← 追加
+// void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
 
 
 
-
-  // Node3からのメッセージ（サイズ判定）
-  if (len == sizeof(Message)) {
-
-
-    Serial.println("Message received");  // ← 追加
-
-Serial.print("potValue: ");
-Serial.println(incomingData.potValue);
-Serial.print("command: ");
-Serial.println(incomingData.command);
+//     Serial.print("len: ");
+//   Serial.println(len);  // ← 追加
 
 
-    memcpy(&incomingData, data, sizeof(incomingData));
+
+
+//   // Node3からのメッセージ（サイズ判定）
+//   if (len == sizeof(Message)) {
+
+
+//     Serial.println("Message received");  // ← 追加
+
+// Serial.print("potValue: ");
+// Serial.println(incomingData.potValue);
+// Serial.print("command: ");
+// Serial.println(incomingData.command);
+
+
+//     memcpy(&incomingData, data, sizeof(incomingData));
     
-    // ポテンショメーター値受信
-    if (incomingData.potValue > 0 && !isRunning && incomingData.command == 0 && remainingSeconds == 0) {
-      targetMinutes = incomingData.potValue;
-      //remainingSeconds = targetMinutes * 60;
-      updateDisplay();
-    }
+//     // ポテンショメーター値受信
+//     if (incomingData.potValue > 0 && !isRunning && incomingData.command == 0 && remainingSeconds == 0) {
+//       targetMinutes = incomingData.potValue;
+//       //remainingSeconds = targetMinutes * 60;
+//       updateDisplay();
+//     }
     
-    // D2ボタン（青）：開始と一時停止のトグル
-if (incomingData.command == 2) {
-  if (targetMinutes > 0 && remainingSeconds == 0) {
-    remainingSeconds = targetMinutes * 60;
-  }
-  if (remainingSeconds > 0) {
-    isRunning = !isRunning;
-    if (isRunning && remainingSeconds == targetMinutes * 60) {
-      // Focus Time開始
-      myDFPlayer.play(1);
+//     // D2ボタン（青）：開始と一時停止のトグル
+// if (incomingData.command == 2) {
+//   if (targetMinutes > 0 && remainingSeconds == 0) {
+//     remainingSeconds = targetMinutes * 60;
+//   }
+//   if (remainingSeconds > 0) {
+//     isRunning = !isRunning;
+//     if (isRunning && remainingSeconds == targetMinutes * 60) {
+//       // Focus Time開始
+//       myDFPlayer.play(1);
       
-      Message servoMsg;
-      servoMsg.key = '\0';
-      servoMsg.servoCommand = 2;
-      servoMsg.command = 0;
-      servoMsg.potValue = 0;
-    servoMsg.focusMinutes = targetMinutes;  //////////////////////      
-      esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
-    }
-    updateDisplay();
-  }
-}
+//       Message servoMsg;
+//       servoMsg.key = '\0';
+//       servoMsg.servoCommand = 2;
+//       servoMsg.command = 0;
+//       servoMsg.potValue = 0;
+//     servoMsg.focusMinutes = targetMinutes;  //////////////////////      
+//       esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+//     }
+//     updateDisplay();
+//   }
+// }
     
-    // D0ボタン（赤）：リセット
-    else if (incomingData.command == 1) {
-  isRunning = false;
-  isBreakTime = false;
-  targetMinutes = 0;
-  remainingSeconds = 0;
-  myDFPlayer.stop();
+//     // D0ボタン（赤）：リセット
+//     else if (incomingData.command == 1) {
+//   isRunning = false;
+//   isBreakTime = false;
+//   targetMinutes = 0;
+//   remainingSeconds = 0;
+//   myDFPlayer.stop();
   
-  Message servoMsg;
-  servoMsg.key = '\0';
-  servoMsg.servoCommand = 3;  // ← 入力待ちモード
-  servoMsg.command = 0;
-  servoMsg.potValue = 0;
-  esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+//   Message servoMsg;
+//   servoMsg.key = '\0';
+//   servoMsg.servoCommand = 3;  // ← 入力待ちモード
+//   servoMsg.command = 0;
+//   servoMsg.potValue = 0;
+//   esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
   
-  updateDisplay();
-    }
-  }
+//   updateDisplay();
+//     }
+//   }
   
-  // Node2からのセンサーデータ
-  else if (len == sizeof(SensorData)) {
+//   // Node2からのセンサーデータ
+//   else if (len == sizeof(SensorData)) {
 
 
 
-    Serial.println("SensorData received");  // ← 追加
+//     Serial.println("SensorData received");  // ← 追加
 
 
 
 
 
+//     unsigned long currentTime = millis();
+//     if (currentTime - lastAlertTime < 2000) {  // 2秒以内ならスキップ
+//       return;
+//     }
+//     lastAlertTime = currentTime;
+    
+//     SensorData sensorData;
+//     memcpy(&sensorData, data, sizeof(sensorData));
+      
+//     Serial.print("Temp: "); Serial.println(sensorData.temp);
+//     Serial.print("Hum: "); Serial.println(sensorData.hum);
+//     Serial.print("Light: "); Serial.println(sensorData.light);
+//     Serial.print("Dist: "); Serial.println(sensorData.distance);
+
+//     // 1. 温度チェック (25度以上)
+//     if (sensorData.temp >= 25.0 && !tempAlertPlayed) {
+//       myDFPlayer.play(3);
+//       tempAlertPlayed = true;
+//     } else if (sensorData.temp < 25.0) {
+//       tempAlertPlayed = false;
+//     }
+    
+//     // 2. 湿度チェック (40%以下)
+//     if (sensorData.hum <= 40.0 && !humAlertPlayed) {
+//       myDFPlayer.play(4);
+//       humAlertPlayed = true;
+//     } else if (sensorData.hum > 40.0) {
+//       humAlertPlayed = false;
+//     }
+    
+//     // 3. 明るさチェック (200以下)
+//     if (sensorData.light <= 200 && !lightAlertPlayed) {
+//       myDFPlayer.play(5);
+//       lightAlertPlayed = true;
+//     } else if (sensorData.light > 200) {
+//       lightAlertPlayed = false;
+//     }
+    
+//     // 4&5. 離席検知 - データ保存のみ
+//     lastDistance = sensorData.distance;
+//   }
+// }
+
+
+
+void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
+  Serial.print("len: ");
+  Serial.println(len);
+
+  if (memcmp(mac, node2Address, 6) == 0) {
+    Serial.println("SensorData received");
     unsigned long currentTime = millis();
-    if (currentTime - lastAlertTime < 2000) {  // 2秒以内ならスキップ
-      return;
-    }
+    if (currentTime - lastAlertTime < 2000) return;
     lastAlertTime = currentTime;
     
     SensorData sensorData;
     memcpy(&sensorData, data, sizeof(sensorData));
-      
+    
     Serial.print("Temp: "); Serial.println(sensorData.temp);
     Serial.print("Hum: "); Serial.println(sensorData.hum);
     Serial.print("Light: "); Serial.println(sensorData.light);
     Serial.print("Dist: "); Serial.println(sensorData.distance);
-
-    // 1. 温度チェック (25度以上)
+Serial.print("Temp>=25: "); Serial.println(sensorData.temp >= 25.0);
+Serial.print("Hum<=40: "); Serial.println(sensorData.hum <= 40.0);
+Serial.print("Light<=200: "); Serial.println(sensorData.light <= 200);
+Serial.print("tempAlertPlayed: "); Serial.println(tempAlertPlayed);
+Serial.print("humAlertPlayed: "); Serial.println(humAlertPlayed);
+Serial.print("lightAlertPlayed: "); Serial.println(lightAlertPlayed);
     if (sensorData.temp >= 25.0 && !tempAlertPlayed) {
       myDFPlayer.play(3);
       tempAlertPlayed = true;
     } else if (sensorData.temp < 25.0) {
       tempAlertPlayed = false;
     }
-    
-    // 2. 湿度チェック (40%以下)
     if (sensorData.hum <= 40.0 && !humAlertPlayed) {
       myDFPlayer.play(4);
       humAlertPlayed = true;
     } else if (sensorData.hum > 40.0) {
       humAlertPlayed = false;
     }
-    
-    // 3. 明るさチェック (200以下)
     if (sensorData.light <= 200 && !lightAlertPlayed) {
       myDFPlayer.play(5);
       lightAlertPlayed = true;
     } else if (sensorData.light > 200) {
       lightAlertPlayed = false;
     }
-    
-    // 4&5. 離席検知 - データ保存のみ
     lastDistance = sensorData.distance;
+
+  } else {
+    Serial.println("Message received");
+    memcpy(&incomingData, data, sizeof(incomingData));
+    
+    if (incomingData.potValue > 0 && !isRunning && incomingData.command == 0 && remainingSeconds == 0) {
+      targetMinutes = incomingData.potValue;
+      updateDisplay();
+    }
+    if (incomingData.command == 2) {
+      if (targetMinutes > 0 && remainingSeconds == 0) {
+        remainingSeconds = targetMinutes * 60;
+      }
+      if (remainingSeconds > 0) {
+        isRunning = !isRunning;
+        if (isRunning && remainingSeconds == targetMinutes * 60) {
+          myDFPlayer.play(1);
+          Message servoMsg;
+          servoMsg.key = '\0';
+          servoMsg.servoCommand = 2;
+          servoMsg.command = 0;
+          servoMsg.potValue = 0;
+          servoMsg.focusMinutes = targetMinutes;
+          esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+        }
+        updateDisplay();
+      }
+    } else if (incomingData.command == 1) {
+      isRunning = false;
+      isBreakTime = false;
+      targetMinutes = 0;
+      remainingSeconds = 0;
+      myDFPlayer.stop();
+      Message servoMsg;
+      servoMsg.key = '\0';
+      servoMsg.servoCommand = 3;
+      servoMsg.command = 0;
+      servoMsg.potValue = 0;
+      esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+      updateDisplay();
+    }
   }
 }
 
@@ -255,6 +346,15 @@ initMsg.servoCommand = 3;  // ← 入力待ちモード
 initMsg.command = 0;
 initMsg.potValue = 0;
 esp_now_send(node3Address, (uint8_t *) &initMsg, sizeof(initMsg));
+
+
+
+
+
+Serial.print("sizeof(Message): ");
+Serial.println(sizeof(Message));
+Serial.print("sizeof(SensorData): ");
+Serial.println(sizeof(SensorData));
 
 }
 
