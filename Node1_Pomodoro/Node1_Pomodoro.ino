@@ -1,3 +1,57 @@
+/*
+ * Node 1 - Central Hub (Focus Timer Controller)
+ * 
+ * Overview:
+ * This system is a customizable Pomodoro-style focus timer that allows
+ * users to set their own focus duration using a potentiometer.
+ * The timer automatically alternates between Focus Time and Break Time,
+ * providing audio and visual feedback throughout the session.
+ *
+ * This node acts as the central hub of the Focus Timer IoT system.
+ * It receives focus time settings and commands from Node 3 via ESP-NOW,
+ * receives environmental sensor data from Node 2 via ESP-NOW,
+ * manages the focus/break timer, and controls the LCD display,
+ * DFPlayer Mini (audio feedback), and active buzzer.
+ * It also hosts a web dashboard and REST API endpoint via WiFi.
+ *
+ * Components:
+ * - ESP8266 NodeMCU
+ * - LCD Display (16x2, I2C, address 0x27) connected to D1(SCK), D2(SDA)
+ * - DFPlayer Mini connected to D7(RX), D8(TX) via 1kΩ resistor on TX
+ * - Speaker (UGSM23A 8Ω) connected to DFPlayer SPK1/SPK2
+ * - Active Buzzer connected to D3
+ *
+ * Pin Connections:
+ * - D1: LCD SCL
+ * - D2: LCD SDA
+ * - D3: Active Buzzer
+ * - D7: DFPlayer RX
+ * - D8: DFPlayer TX (via 1kΩ resistor)
+ *
+ * Dependencies:
+ * - ESP8266WiFi
+ * - ESP8266WebServer
+ * - espnow
+ * - Wire
+ * - LiquidCrystal_I2C
+ * - SoftwareSerial
+ * - DFRobotDFPlayerMini
+ *
+ * Communication:
+ * - ESP-NOW: Receives commands from Node 3, sensor data from Node 2
+ * - WiFi: Hosts web dashboard at http://<IP>/ and JSON endpoint at http://<IP>/data
+ *
+ * Audio Files (SD card):
+ * - Track 1: Focus Time BGM
+ * - Track 2: Focus Time end notification
+ * - Track 3: High temperature alert
+ * - Track 4: Low humidity alert
+ * - Track 5: Low light alert
+ * - Track 6: User away alert
+ * - Track 7: User returned notification
+ * - Track 8: Break Time BGM
+ */
+
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <espnow.h>
@@ -5,32 +59,38 @@
 #include <LiquidCrystal_I2C.h>
 #include <SoftwareSerial.h>
 #include <DFRobotDFPlayerMini.h>
-#include "arduino_secrets.h"//////////
+#include "arduino_secrets.h"
 
-ESP8266WebServer server(80);//////////
+ESP8266WebServer server(80);
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 SoftwareSerial mySoftwareSerial(D7, D8); // RX, TX
 DFRobotDFPlayerMini myDFPlayer;
 
+// MAC addresses of peer nodes for ESP-NOW communication
 uint8_t node3Address[] = {0xDC, 0x4F, 0x22, 0x7F, 0x43, 0xAE};
-uint8_t node2Address[] = {0xE8, 0xDB, 0x84, 0xF0, 0x6D, 0xEF}; // Node2のMACアドレスを入力
+uint8_t node2Address[] = {0xE8, 0xDB, 0x84, 0xF0, 0x6D, 0xEF};
 
+// Timer state variables
 int targetMinutes = 0;
 bool isRunning = false;
 unsigned long previousMillis = 0;
 long remainingSeconds = 0;
 
+// Message structure for ESP-NOW communication with Node 3
+// Must match the structure defined in Node 3
 struct Message {
   char key;
   int command;
   int potValue;
   int servoCommand;
-    int focusMinutes;/////////
+  int focusMinutes;
 };
 
 Message incomingData;
 
+// Sensor data structure for ESP-NOW communication with Node 2
+// Must match the structure defined in Node 2
 struct SensorData {
   float temp;
   float hum;
@@ -39,6 +99,7 @@ struct SensorData {
   int nodeId;
 };
 
+// Alert state flags to prevent repeated alerts
 bool tempAlertPlayed = false;
 bool humAlertPlayed = false;
 bool lightAlertPlayed = false;
@@ -47,13 +108,14 @@ unsigned long lastAlertTime = 0;
 float lastDistance = 0;
 
 bool isBreakTime = false;
-const int BREAK_TIME = 5;   // 休憩時間（分）
+const int BREAK_TIME = 5;
 
-
+// Buzzer settings - sounds every BUZZ_INTERVAL ms during Focus Time
 const int BUZZER_PIN = D3;
 unsigned long lastBuzzTime = 0;
 const unsigned long BUZZ_INTERVAL = 5000;
 
+// Updates the LCD display based on current timer state
 void updateDisplay() {
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -67,7 +129,7 @@ void updateDisplay() {
     int m = remainingSeconds / 60;
     int s = remainingSeconds % 60;
     lcd.printf("Time: %02d:%02d", m, s);
-  } else if (remainingSeconds > 0 && targetMinutes > 0) {  // ← PAUSE表示追加
+  } else if (remainingSeconds > 0 && targetMinutes > 0) {
     lcd.print("== PAUSED ==");
     lcd.setCursor(0, 1);
     int m = remainingSeconds / 60;
@@ -84,10 +146,11 @@ void updateDisplay() {
   }
 }
 
+// ESP-NOW receive callback
+// Distinguishes between Node 2 (SensorData) and Node 3 (Message) by MAC address
 void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
-  Serial.print("len: ");
-  Serial.println(len);
 
+  // If data is from Node 2, process as sensor data
   if (memcmp(mac, node2Address, 6) == 0) {
     Serial.println("SensorData received");
     unsigned long currentTime = millis();
@@ -97,16 +160,6 @@ void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
     SensorData sensorData;
     memcpy(&sensorData, data, sizeof(sensorData));
     
-    Serial.print("Temp: "); Serial.println(sensorData.temp);
-    Serial.print("Hum: "); Serial.println(sensorData.hum);
-    Serial.print("Light: "); Serial.println(sensorData.light);
-    Serial.print("Dist: "); Serial.println(sensorData.distance);
-Serial.print("Temp>=25: "); Serial.println(sensorData.temp >= 25.0);
-Serial.print("Hum<=40: "); Serial.println(sensorData.hum <= 40.0);
-Serial.print("Light<=200: "); Serial.println(sensorData.light <= 200);
-Serial.print("tempAlertPlayed: "); Serial.println(tempAlertPlayed);
-Serial.print("humAlertPlayed: "); Serial.println(humAlertPlayed);
-Serial.print("lightAlertPlayed: "); Serial.println(lightAlertPlayed);
     if (sensorData.temp >= 25.0 && !tempAlertPlayed) {
       myDFPlayer.play(3);
       tempAlertPlayed = true;
@@ -127,14 +180,16 @@ Serial.print("lightAlertPlayed: "); Serial.println(lightAlertPlayed);
     }
     lastDistance = sensorData.distance;
 
+  // If data is from Node 3, process as command message
   } else {
-    Serial.println("Message received");
     memcpy(&incomingData, data, sizeof(incomingData));
     
     if (incomingData.potValue > 0 && !isRunning && incomingData.command == 0 && remainingSeconds == 0) {
       targetMinutes = incomingData.potValue;
       updateDisplay();
     }
+
+    // Blue button: start/pause toggle
     if (incomingData.command == 2) {
       if (targetMinutes > 0 && remainingSeconds == 0) {
         remainingSeconds = targetMinutes * 60;
@@ -153,6 +208,8 @@ Serial.print("lightAlertPlayed: "); Serial.println(lightAlertPlayed);
         }
         updateDisplay();
       }
+
+    // Red button: reset timer and return to ready state  
     } else if (incomingData.command == 1) {
       isRunning = false;
       isBreakTime = false;
@@ -173,8 +230,7 @@ Serial.print("lightAlertPlayed: "); Serial.println(lightAlertPlayed);
 void setup() {
   Serial.begin(115200);
 
-
-  delay(2000);  // ← 変更
+  delay(2000);
   Serial.print("sizeof(Message): ");
   Serial.println(sizeof(Message));
   Serial.print("sizeof(SensorData): ");
@@ -193,19 +249,12 @@ void setup() {
     lcd.print("DFPlayer Error");
     //while(1);
   }
-  //Serial.println("DFPlayer OK");
+
   delay(500);
-  myDFPlayer.volume(30);
-  
+  myDFPlayer.volume(20);
 
-
-pinMode(BUZZER_PIN, OUTPUT);
-digitalWrite(BUZZER_PIN, LOW);
-
-
-
-
-
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
 
   updateDisplay();
 
@@ -215,73 +264,61 @@ digitalWrite(BUZZER_PIN, LOW);
   esp_now_register_recv_cb(onDataRecv);
 
   esp_now_add_peer(node3Address, ESP_NOW_ROLE_CONTROLLER, 1, NULL, 0);
-Message initMsg;
-initMsg.key = '\0';
-initMsg.servoCommand = 3;  // ← 入力待ちモード
-initMsg.command = 0;
-initMsg.potValue = 0;
-esp_now_send(node3Address, (uint8_t *) &initMsg, sizeof(initMsg));
+  Message initMsg;
+  initMsg.key = '\0';
+  initMsg.servoCommand = 3;  //Wait for input
+  initMsg.command = 0;
+  initMsg.potValue = 0;
+  esp_now_send(node3Address, (uint8_t *) &initMsg, sizeof(initMsg));
 
+  Serial.print("sizeof(Message): ");
+  Serial.println(sizeof(Message));
+  Serial.print("sizeof(SensorData): ");
+  Serial.println(sizeof(SensorData));
 
+  // WiFi.begin(SECRET_SSID, SECRET_PASS);
 
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   delay(500);
+  //   Serial.print(".");
+  // }
+  // Serial.print("IP: ");
+  // Serial.println(WiFi.localIP());
 
+  // server.on("/", []() {
+  //   String html = "<html><body>";
+  //   html += "<h1>Node 1 Dashboard</h1>";
+  //   html += "<p>Status: " + String(isRunning ? "Running" : "Stopped") + "</p>";
+  //   html += "<p>Target: " + String(targetMinutes) + " min</p>";
+  //   html += "<p>Remaining: " + String(remainingSeconds / 60) + " min " + String(remainingSeconds % 60) + " sec</p>";
+  //   html += "<p>Mode: " + String(isBreakTime ? "Break" : "Focus") + "</p>";
+  //   html += "</body></html>";
+  //   server.send(200, "text/html", html);
+  // });
 
-Serial.print("sizeof(Message): ");
-Serial.println(sizeof(Message));
-Serial.print("sizeof(SensorData): ");
-Serial.println(sizeof(SensorData));
+  // server.on("/data", []() {
+  //   String json = "{";
+  //   json += "\"status\":\"" + String(isRunning ? "running" : "stopped") + "\",";
+  //   json += "\"targetMinutes\":" + String(targetMinutes) + ",";
+  //   json += "\"remainingSeconds\":" + String(remainingSeconds) + ",";
+  //   json += "\"isBreakTime\":" + String(isBreakTime ? "true" : "false");
+  //   json += "}";
+  //   server.send(200, "application/json", json);
+  // });
 
-
-
-
-  ///////////////////////////
-  WiFi.begin(SECRET_SSID, SECRET_PASS);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
-
-  server.on("/", []() {
-    String html = "<html><body>";
-    html += "<h1>Node 1 Dashboard</h1>";
-    html += "<p>Status: " + String(isRunning ? "Running" : "Stopped") + "</p>";
-    html += "<p>Target: " + String(targetMinutes) + " min</p>";
-    html += "<p>Remaining: " + String(remainingSeconds / 60) + " min " + String(remainingSeconds % 60) + " sec</p>";
-    html += "<p>Mode: " + String(isBreakTime ? "Break" : "Focus") + "</p>";
-    html += "</body></html>";
-    server.send(200, "text/html", html);
-  });
-
-  server.on("/data", []() {
-    String json = "{";
-    json += "\"status\":\"" + String(isRunning ? "running" : "stopped") + "\",";
-    json += "\"targetMinutes\":" + String(targetMinutes) + ",";
-    json += "\"remainingSeconds\":" + String(remainingSeconds) + ",";
-    json += "\"isBreakTime\":" + String(isBreakTime ? "true" : "false");
-    json += "}";
-    server.send(200, "application/json", json);
-  });
-
-  server.begin();
-
-
-
-
+  // server.begin();
 }
 
 void loop() {
 
-  /////////////////////////////
-  server.handleClient();
+  // server.handleClient();
 
-  // 離席検知処理（学習中のみ）
-  if (!isBreakTime) {  // ← 追加
+  // Absence detection - only active during Focus Time (not Break Time)
+  if (!isBreakTime) {
     if (lastDistance >= 80.0 && !userAway) {
       myDFPlayer.play(6);
       userAway = true;
-      if (isRunning) {
+            if (isRunning) {
         isRunning = false;
         updateDisplay();
       }
@@ -293,84 +330,73 @@ void loop() {
         updateDisplay();
       }
     }
-  }  // ← 追加
+  }
 
-  // タイマー処理（以下変更なし）
+  // Timer processing - count down every second
   if (isRunning && remainingSeconds > 0) {
     unsigned long currentMillis = millis();
     if (currentMillis - previousMillis >= 1000) {
       previousMillis = currentMillis;
       remainingSeconds--;
 
+    if (!isBreakTime) {
+      unsigned long currentMillis2 = millis();
+      if (currentMillis2 - lastBuzzTime >= BUZZ_INTERVAL) {
+        lastBuzzTime = currentMillis2;
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(50);
+        digitalWrite(BUZZER_PIN, LOW);
+      }
+    }
 
+    updateDisplay();
 
+      // Timer reached zero - switch between Focus and Break Time
+      if (remainingSeconds <= 0) {
+        if (!isBreakTime) {
+          // Update "isBreakTime" and "remainingSeconds"
+          isBreakTime = true;
+          remainingSeconds = BREAK_TIME * 60;
+          isRunning = true;
+          
+          // Servo and voice
+          Message servoMsg;
+          servoMsg.key = '\0';
+          servoMsg.servoCommand = 1;
+          servoMsg.command = 0;
+          servoMsg.potValue = 0;
 
-
-
-if (!isBreakTime) {
-  unsigned long currentMillis2 = millis();
-  if (currentMillis2 - lastBuzzTime >= BUZZ_INTERVAL) {
-    lastBuzzTime = currentMillis2;
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(50);
-    digitalWrite(BUZZER_PIN, LOW);
-  }
-}
-
-
-
-
-
-
-
-
-
-      updateDisplay();
-
-if (remainingSeconds <= 0) {
-  if (!isBreakTime) {
-    // すぐにisBreakTimeとremainingSecondsを更新
-    isBreakTime = true;
-    remainingSeconds = BREAK_TIME * 60;
-    isRunning = true;
-    
-    // その後サーボと音声
-    Message servoMsg;
-    servoMsg.key = '\0';
-    servoMsg.servoCommand = 1;
-    servoMsg.command = 0;
-    servoMsg.potValue = 0;
-    esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
-    
-    myDFPlayer.play(2);
-    delay(3000);
-    myDFPlayer.play(8);
-    lcd.clear();
-    lcd.print("Break Time!");
-    delay(2000);
-  } else {
-    // すぐにisBreakTimeとremainingSecondsを更新
-    isBreakTime = false;
-    remainingSeconds = targetMinutes * 60;
-    isRunning = true;
-    
-    // その後サーボと音声
-    Message servoMsg;
-    servoMsg.key = '\0';
-    servoMsg.servoCommand = 2;
-    servoMsg.command = 0;
-    servoMsg.potValue = 0;
-    esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
-    
-    myDFPlayer.stop();
-    delay(500);
-    myDFPlayer.play(1);
-    lcd.clear();
-    lcd.print("Study Time!");
-    delay(2000);
-  }
-  updateDisplay();
-}
+          esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+          
+          myDFPlayer.play(2);
+          delay(3000);
+          myDFPlayer.play(8);
+          lcd.clear();
+          lcd.print("Break Time!");
+          delay(2000);
+        } else {
+          // Update "isBreakTime" and "remainingSeconds"
+          isBreakTime = false;
+          remainingSeconds = targetMinutes * 60;
+          isRunning = true;
+          
+          // Servo and voice
+          Message servoMsg;
+          servoMsg.key = '\0';
+          servoMsg.servoCommand = 2;
+          servoMsg.command = 0;
+          servoMsg.potValue = 0;
+          esp_now_send(node3Address, (uint8_t *) &servoMsg, sizeof(servoMsg));
+          
+          myDFPlayer.stop();
+          delay(500);
+          myDFPlayer.play(1);
+          lcd.clear();
+          lcd.print("Study Time!");
+          delay(2000);
+        }
+        updateDisplay();
+      }
     }
   }
 }

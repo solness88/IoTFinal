@@ -1,3 +1,49 @@
+/*
+ * Node 3 - User Input and Actuator Node
+ *
+ * Overview:
+ * This node is part of a customizable Pomodoro-style focus timer system.
+ * It allows the user to set the focus duration using a potentiometer,
+ * and sends commands to Node 1 (Central Hub) via ESP-NOW.
+ * It receives mode updates from Node 1 and controls actuators accordingly.
+ * It also hosts a web dashboard and REST API endpoint via WiFi.
+ *
+ * Components:
+ * - ESP8266 NodeMCU
+ * - Potentiometer connected to A0 (sets focus duration 1-60 minutes)
+ * - Push Button (Start/Pause) connected to D1
+ * - Push Button (Reset) connected to D2
+ * - Servo Motor connected to D0
+ * - LED Blue connected to D3 (Focus Time indicator)
+ * - LED Red connected to D4 (Break Time indicator)
+ * - LED Yellow connected to D5 (Ready/Standby indicator)
+ * - OLED Display (128x64, I2C, address 0x3C) connected to D6(SDA), D7(SCL)
+ *
+ * Pin Connections:
+ * - A0: Potentiometer
+ * - D0: Servo Motor
+ * - D1: Start/Pause Button
+ * - D2: Reset Button
+ * - D3: LED Blue
+ * - D4: LED Red
+ * - D5: LED Yellow
+ * - D6: OLED SDA
+ * - D7: OLED SCL
+ *
+ * Dependencies:
+ * - ESP8266WiFi
+ * - ESP8266WebServer
+ * - espnow
+ * - Servo
+ * - Wire
+ * - Adafruit_GFX
+ * - Adafruit_SSD1306
+ *
+ * Communication:
+ * - ESP-NOW: Sends potentiometer value and button commands to Node 1
+ *            Receives mode updates (Focus/Break/Ready) from Node 1
+ * - WiFi: Hosts web dashboard at http://<IP>/ and JSON endpoint at http://<IP>/data
+ */
 
 #include <ESP8266WebServer.h>
 #include "arduino_secrets.h"
@@ -10,29 +56,32 @@
 
 ESP8266WebServer server(80);
 
-// Node 1のMACアドレス
+// MAC address of Node 1 (Central Hub) for ESP-NOW communication
 uint8_t receiverAddress[] = {0xC4, 0x5B, 0xBE, 0xF4, 0x2C, 0x67};
 
+// Pin definitions
 const int potPin = A0;
 const int btnStart = D1;
 const int btnReset = D2;
 const int SERVO_PIN = D0;
 
-// LED設定
+// LED settings
 const int LED_BLUE = D3;
 const int LED_RED = D4;
 const int LED_YELLOW = D5;
 
 Servo myServo;
 
+// Message structure for ESP-NOW communication with Node 1
+// Must match the structure defined in Node 1!!!
 struct Message {
   char key;
   int command;
   int potValue;
   int servoCommand;
-    int focusMinutes;
-
+  int focusMinutes;
 };
+
 Message myData;
 Message incomingData;
 
@@ -41,14 +90,20 @@ Message incomingData;
 #define OLED_RESET -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+// OLED display update interval
 unsigned long lastDisplayUpdate = 0;
 const unsigned long DISPLAY_INTERVAL = 200;
 
+// Potentiometer state variables
 int lastPotMinutes = 0;
-int currentServoMode = 3; // 受信したモードを保持する変数（初期値は入力待ち）
+
+// Current mode received from Node 1
+// 1: Break Time, 2: Focus Time, 3: Ready (waiting for input)
+int currentServoMode = 3;
 
 int fixedPotMinutes = 1;
 
+// Updates the OLED display with current focus time and mode
 void updateDisplay(int minutes) {
   display.clearDisplay();
   display.setTextSize(1);
@@ -63,6 +118,7 @@ void updateDisplay(int minutes) {
   display.print(" min");
   display.setTextSize(1);
   display.setCursor(0, 54);
+
   if (currentServoMode == 1) {
     display.print("Mode: BREAK");
   } else if (currentServoMode == 2) {
@@ -73,12 +129,12 @@ void updateDisplay(int minutes) {
   display.display();
 }
 
+// ESP-NOW receive callback
+// Receives mode updates from Node 1 and updates currentServoMode
 void onDataRecv(uint8_t * mac, uint8_t *data, uint8_t len) {
   memcpy(&incomingData, data, sizeof(incomingData));
-  Serial.print("Received servoCommand: ");
-  Serial.println(incomingData.servoCommand);
   
-  // モードを更新
+  // Update mode
   if (incomingData.servoCommand != 0) {
     currentServoMode = incomingData.servoCommand;
   }
@@ -114,9 +170,10 @@ void setup() {
     display.display();
   }
 
-
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+
+  // Connect to WiFi to enable web dashboard and REST API endpoint
   WiFi.begin(SECRET_SSID, SECRET_PASS);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -149,17 +206,8 @@ void setup() {
   });
 
   server.begin();
+  // End of WiFi and web server setup
 
-
-
-
-
-
-
-
-
-
-  
   if (esp_now_init() != 0) {
     Serial.println("ESP-NOW Init Failed");
     return;
@@ -171,41 +219,36 @@ void setup() {
   
   Serial.println("Node 3 Ready.");
 
-
-lastPotMinutes = map(analogRead(potPin), 0, 1023, 1, 60);
-fixedPotMinutes = lastPotMinutes;
+  lastPotMinutes = map(analogRead(potPin), 0, 1023, 1, 60);
+  fixedPotMinutes = lastPotMinutes;
   
 }
 
 void loop() {
 
-
   server.handleClient();
 
-
-
-
-  // --- 受信したモードに基づいてアクチュエータ（サーボ・LED・モーター）を制御 ---
-  if (currentServoMode == 1) {  // Break Time
+  // Control actuators (servo, LEDs) based on the mode received from Node 1
+  if (currentServoMode == 1) { // Break Time: servo at 0°, red LED on
     myServo.write(0);
     digitalWrite(LED_BLUE, LOW);
     digitalWrite(LED_RED, HIGH);
     digitalWrite(LED_YELLOW, LOW);
   } 
-  else if (currentServoMode == 2) {  // Focus Time
+  else if (currentServoMode == 2) { // Focus Time: servo at 180°, blue LED on
     myServo.write(180);
     digitalWrite(LED_BLUE, HIGH);
     digitalWrite(LED_RED, LOW);
     digitalWrite(LED_YELLOW, LOW);
   } 
-  else if (currentServoMode == 3) {  // 入力待ち
+  else if (currentServoMode == 3) { // Ready: servo at 180°, yellow LED on
     myServo.write(180);
     digitalWrite(LED_BLUE, LOW);
     digitalWrite(LED_RED, LOW);
     digitalWrite(LED_YELLOW, HIGH);
   }
 
-  // --- 送信処理 ---
+  // Prepare and send data to Node 1 via ESP-NOW
   myData.key = '\0';
   myData.command = 0;
   myData.potValue = 0;
@@ -218,8 +261,9 @@ void loop() {
   if (currentServoMode == 3 && abs(potMinutes - lastPotMinutes) >= 1) {
     myData.potValue = potMinutes;
     lastPotMinutes = potMinutes;
-      fixedPotMinutes = potMinutes; // 入力待ち時のみ更新
 
+    // Only update displayed value in Ready mode
+    fixedPotMinutes = potMinutes;
     shouldSend = true;
   }
 

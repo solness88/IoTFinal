@@ -1,3 +1,40 @@
+/*
+ * Node 2 - Environmental Sensor Node
+ *
+ * Overview:
+ * This node is part of a customizable Pomodoro-style focus timer system.
+ * It monitors the user's study environment by collecting data from
+ * multiple sensors and transmits the data to Node 1 via ESP-NOW every 2 seconds.
+ * Sensor readings are also displayed on the OLED display.
+ * It also hosts a web dashboard and REST API endpoint via WiFi.
+ *
+ * Components:
+ * - ESP8266 NodeMCU
+ * - DHT11 Temperature and Humidity Sensor connected to D4
+ * - HC-SR04 Ultrasonic Ranging Module connected to D5(TRIG), D6(ECHO)
+ * - Photoresistor connected to A0 (with 10kΩ pull-down resistor)
+ * - OLED Display (128x64, I2C, address 0x3C)
+ *
+ * Pin Connections:
+ * - A0: Photoresistor
+ * - D4: DHT11 Data
+ * - D5: HC-SR04 TRIG
+ * - D6: HC-SR04 ECHO
+ *
+ * Dependencies:
+ * - ESP8266WiFi
+ * - ESP8266WebServer
+ * - espnow
+ * - DHT
+ * - Wire
+ * - Adafruit_GFX
+ * - Adafruit_SSD1306
+ *
+ * Communication:
+ * - ESP-NOW: Transmits sensor data to Node 1 every 2 seconds
+ * - WiFi: Hosts web dashboard at http://<IP>/ and JSON endpoint at http://<IP>/data
+ */
+
 #include <ESP8266WebServer.h>
 #include "arduino_secrets.h"
 #include <ESP8266WiFi.h>
@@ -20,8 +57,12 @@ ESP8266WebServer server(80);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 DHT dht(DHTPIN, DHTTYPE);
+
+// MAC address of Node 1 (Central Hub) for ESP-NOW communication
 uint8_t broadcastAddress[] = {0xC4, 0x5B, 0xBE, 0xF4, 0x2C, 0x67};
 
+// Sensor data structure for ESP-NOW communication with Node 1
+// Must match the SensorData structure defined in Node 1
 typedef struct struct_message {
   float temp;
   float hum;
@@ -35,15 +76,7 @@ struct_message myData;
 void setup() {
   Serial.begin(115200);
 
-
-
-Serial.print("MAC: ");
-Serial.println(WiFi.macAddress());
-
-
-
-
-
+  // Initialize sensors
   dht.begin();
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
@@ -60,9 +93,7 @@ Serial.println(WiFi.macAddress());
   esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
   Serial.println("Node 2 Started");
 
-
-
-
+  // Connect to WiFi to enable web dashboard and REST API endpoint
   WiFi.begin(SECRET_SSID, SECRET_PASS);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -93,14 +124,7 @@ Serial.println(WiFi.macAddress());
   });
 
   server.begin();
-
-
-
-
-
-
-
-
+  // End of WiFi and web server setup
 
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("OLED Error");
@@ -113,18 +137,15 @@ Serial.println(WiFi.macAddress());
 
 void loop() {
 
-
   server.handleClient();
-
-
   myData.nodeId = 2; 
 
-  // 1. 各センサーの値を読み取る
+  // 1. Read all sensor values
   myData.temp = dht.readTemperature();
   myData.hum = dht.readHumidity();
   myData.light = analogRead(LIGHT_PIN);
 
-  // 2. 超音波センサーで距離を測定
+  // 2. Measure distance using ultrasonic sensor
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
@@ -133,18 +154,19 @@ void loop() {
   long duration = pulseIn(ECHO_PIN, HIGH);
   myData.distance = duration * 0.034 / 2;
 
-  // 3. データを送信！(これが重要)
+  // 3. Send sensor data to Node 1 via ESP-NOW
   esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
 
-  // 4. 確認用にシリアルモニターに出力
+  // 4. Output sensor values to serial monitor for debugging
   Serial.print("Temp: "); Serial.print(myData.temp);
   Serial.print(" Hum: "); Serial.print(myData.hum);
   Serial.print(" Light: "); Serial.print(myData.light);
   Serial.print(" Dist: "); Serial.println(myData.distance);
 
-  delay(2000); // 2秒おきに送信
+  // Sned data in every 2 seconds
+  delay(2000);
 
-  // OLED表示
+  // Update OLED display with latest sensor readings
   display.clearDisplay();
   display.setCursor(0, 0);
   display.setTextSize(2);
